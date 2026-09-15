@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: fct_sessions
+    description: One row per session. The grain every other mart aggregates from.
+    columns:
+      - name: session_key
+        data_tests: [unique, not_null]
+      - name: user_pseudo_id
+        data_tests: [not_null]
+      - name: channel
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [Direct, Organic Search, Paid Search, Referral, Email, Obfuscated, Other, Unknown]
+
+  - name: fct_funnel_segments
+    description: Ordered and open funnel counts, overall and by device, channel and user type.
+
+  - name: fct_weekly_metrics
+    description: The revenue metric tree per ISO week, with a full-week flag.
+    columns:
+      - name: week_start
+        data_tests: [unique, not_null]
+
+  - name: fct_cohort_retention
+    description: Weekly new-user cohorts over fully observed weeks only.
+
+  - name: fct_user_windows
+    description: Per-user outcome in the experiment window, plus pre-period history.
+    columns:
+      - name: user_pseudo_id
+        data_tests: [unique, not_null]

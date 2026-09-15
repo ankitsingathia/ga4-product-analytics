@@ -1,0 +1,27 @@
+name: gpa
+version: "0.1.0"
+config-version: 2
+profile: gpa
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # add_to_cart and add_shipping_info are left out for measured reasons
+  # (DECISIONS D-16, D-17). Must match gpa.schema.FUNNEL_STEPS;
+  # tests/test_extract.py enforces it.
+  funnel_steps: [view_item, begin_checkout, add_payment_info, purchase]
+  # The experiment-design window: three full post-holiday weeks, ending before
+  # revenue tracking broke. Everything before it is the CUPED pre-period.
+  experiment_start: "2021-01-04"
+  experiment_end: "2021-01-24"
+  # From 2021-01-26 most purchases record $0 revenue (DECISIONS D-18). Weeks
+  # ending after this date are left out of the revenue decomposition.
+  revenue_reliable_through: "2021-01-25"
+
+models:
+  gpa:
+    +materialized: table

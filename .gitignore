@@ -1,0 +1,24 @@
+# Data is never committed. The raw extract is reproducible from BigQuery with
+# one command, and everything downstream rebuilds from it in about a minute.
+data/
+out/
+*.duckdb
+*.duckdb.wal
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# OS
+Thumbs.db
+.DS_Store

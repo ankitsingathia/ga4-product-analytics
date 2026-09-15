@@ -1,0 +1,9 @@
+# Local-only profile. DuckDB is in-process, so there is no server and no
+# credentials. scripts/build_all.py sets GPA_DUCKDB to an absolute path.
+gpa:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('GPA_DUCKDB', '../data/warehouse.duckdb') }}"
+      threads: 4
