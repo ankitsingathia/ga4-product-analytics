@@ -16,6 +16,7 @@ import io
 import json
 import math
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import matplotlib
@@ -32,10 +33,11 @@ SEQ = LinearSegmentedColormap.from_list(
     "seq_blue", ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"])
 
 STEP = {
-    "view_item": "View item", "add_to_cart": "Add to cart", "begin_checkout": "Begin checkout",
-    "add_shipping_info": "Shipping info", "add_payment_info": "Payment info", "purchase": "Purchase",
+    "view_item": "Product page", "add_to_cart": "Cart", "begin_checkout": "Checkout",
+    "add_shipping_info": "Shipping details", "add_payment_info": "Payment", "purchase": "Purchase",
 }
-COMP = {"users": "Users", "sessions_per_user": "Sessions per user", "conversion": "Conversion", "aov": "Order value"}
+COMP = {"users": "Visitors", "sessions_per_user": "Visits per visitor", "conversion": "Conversion",
+        "aov": "Order size"}
 
 plt.rcParams.update({
     "font.family": ["Segoe UI", "DejaVu Sans", "sans-serif"],
@@ -121,7 +123,7 @@ def chart_funnel_by_device(res: dict) -> str:
     ax.set_xlim(0, 1.05)
     ax.xaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
     ax.grid(axis="x", color=GRID, linewidth=0.6)
-    ax.set_xlabel("Share of sessions at the previous step that reach this one")
+    ax.set_xlabel("Share of visits at the previous step that make it to this one")
     ax.legend(frameon=False, loc="lower right", fontsize=8.5)
     return _png(fig)
 
@@ -144,8 +146,8 @@ def chart_metric_tree(res: dict) -> str:
     ax.set_xticks(x, [w["week_start"][5:] for w in weeks], rotation=0, fontsize=8)
     ax.yaxis.set_major_formatter(lambda v, _: f"{v * 100:+.0f}")
     ax.grid(axis="y", color=GRID, linewidth=0.6)
-    ax.set_ylabel("Log-points vs baseline (about %)")
-    ax.set_xlabel("Week starting (month-day)")
+    ax.set_ylabel("Change vs early November (roughly %)")
+    ax.set_xlabel("Week starting")
     lo, hi = min(neg.min(), min(totals)), max(pos.max(), max(totals))
     pad = 0.08 * (hi - lo)
     ax.set_ylim(lo - pad, hi + pad)
@@ -170,7 +172,7 @@ def chart_retention(res: dict) -> str:
     ax.set_xticks(range(len(offsets)), offsets)
     ax.set_yticks(range(len(cohorts)), [c[5:] for c in cohorts])
     ax.set_xlabel("Weeks since first visit")
-    ax.set_ylabel("Cohort (week starting)")
+    ax.set_ylabel("First visit in the week of")
     for s in ax.spines.values():
         s.set_visible(False)
     cb = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
@@ -198,13 +200,13 @@ def chart_channels(res: dict) -> str:
     ax.set_yticks(y, [c["channel"] for c in ch])
     ax.xaxis.set_major_formatter(lambda v, _: f"{v:.1%}")
     ax.grid(axis="x", color=GRID, linewidth=0.6)
-    ax.set_xlabel("Session conversion rate, 95% interval")
+    ax.set_xlabel("Share of visits ending in an order, with 95% range")
     return _png(fig)
 
 
 def chart_aa(res: dict) -> str:
     aa = res["experiment"]["aa"]
-    labels = ["Naive\n(sessions independent)", "Delta method\n(users randomised)"]
+    labels = ["Simple test\n(each visit counted alone)", "Delta method\n(each person counted once)"]
     vals = [aa["fpr_naive"], aa["fpr_delta"]]
     cis = [aa["fpr_naive_ci"], aa["fpr_delta_ci"]]
     fig, ax = _axes(5.4, 2.8)
@@ -221,228 +223,362 @@ def chart_aa(res: dict) -> str:
     ax.set_xlim(-0.6, 1.9)
     ax.yaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
     ax.grid(axis="y", color=GRID, linewidth=0.6)
-    ax.set_ylabel("False-positive rate")
+    ax.set_ylabel("Fake tests flagged as significant")
     return _png(fig)
 
 
 # ---- page ------------------------------------------------------------------
 
 CSS = """
-:root{--bg:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--line:#e1e0d9;
---warn:#8a5a00;--warnbg:#fff4d6;--fail:#a11f1f}
+:root{--bg:#fbfbf9;--ink:#1a1a18;--ink2:#55544f;--muted:#8a8984;--line:#e4e3dc;--warn:#8a5a00;--fail:#a11f1f}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
-font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:880px;margin:0 auto;padding:40px 22px 80px}
-h1{font-size:28px;line-height:1.2;margin:0 0 6px}h2{font-size:19px;margin:48px 0 8px;padding-top:18px;
-border-top:1px solid var(--line)}h3{font-size:15px;margin:22px 0 6px}
-p{margin:8px 0;max-width:68ch}.sub{color:var(--ink2);margin:0 0 20px}.note{color:var(--ink2);font-size:13.5px}
-.stamp{background:#3a1d00;color:#fff;padding:12px 16px;border-radius:8px;margin:0 0 22px;font-weight:600}
-.stamp span{font-weight:400;opacity:.85}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:18px 0}
-.tile{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
-.tile b{display:block;font-size:22px;font-weight:600}.tile span{color:var(--ink2);font-size:12.5px}
-.rec{background:var(--surface);border:1px solid var(--line);border-left:4px solid #2a78d6;border-radius:8px;
-padding:14px 18px;margin:18px 0}
-figure{margin:14px 0;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px}
-figure img{width:100%;height:auto;display:block}figcaption{color:var(--ink2);font-size:13px;margin-top:6px}
-.tw{overflow-x:auto;margin:10px 0}table{border-collapse:collapse;width:100%;font-size:13.5px}
+font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:760px;margin:0 auto;padding:48px 22px 96px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px;font-weight:650}
+h2{font-size:20px;margin:56px 0 10px;font-weight:650}h3{font-size:16.5px;margin:30px 0 6px}
+p{margin:12px 0}ol{padding-left:22px}li{margin:10px 0}a{color:#1f5fae}
+.byline{color:var(--ink2);margin:0 0 28px;font-size:14.5px}
+.small{color:var(--ink2);font-size:14.5px}
+.stamp{border:2px solid #7a3b00;color:#7a3b00;padding:10px 14px;margin:0 0 24px;font-weight:600}
+figure{margin:22px 0}figure img{width:100%;height:auto;display:block;border:1px solid var(--line)}
+figcaption{color:var(--ink2);font-size:13.5px;margin-top:6px}
+details{margin:14px 0}summary{cursor:pointer;color:var(--ink2);font-size:14.5px}
+.tw{overflow-x:auto;margin:12px 0}table{border-collapse:collapse;width:100%;font-size:13.5px}
 th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{color:var(--ink2);font-weight:600}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
-.sev-warn{color:var(--warn);font-weight:600}.sev-fail{color:var(--fail);font-weight:600}
-.sev-info{color:var(--muted)}code{font-size:13px;background:#efeee9;padding:1px 5px;border-radius:4px}
+.sev-warn{color:var(--warn);font-weight:600}.sev-fail{color:var(--fail);font-weight:600}.sev-info{color:var(--muted)}
+code{font-size:14px;background:#efeee8;padding:1px 5px;border-radius:3px}
 """
 
+BLACK_FRIDAY_WEEK = "2020-11-23"  # Black Friday 2020 was 27 November
+REPO_URL = "https://github.com/ankitsingathia/ga4-product-analytics"
+PROSE = {
+    "view_item": "a product page", "add_to_cart": "the cart", "begin_checkout": "checkout",
+    "add_shipping_info": "shipping details", "add_payment_info": "the payment step", "purchase": "a purchase",
+}
+GAIN = {"users": "more visitors", "sessions_per_user": "people visiting more often",
+        "conversion": "more of them buying", "aov": "bigger orders"}
+LOSS = {"users": "fewer visitors", "sessions_per_user": "fewer repeat visits",
+        "conversion": "fewer visitors buying", "aov": "smaller orders"}
+WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
+WEEKS = {7: "a week", 14: "two weeks", 21: "three weeks", 28: "four weeks"}
 
-def recommendation(res: dict) -> str:
+
+def day(s, year: bool = False) -> str:
+    d = date.fromisoformat(str(s)[:10])
+    return f"{d.day} {d.strftime('%B')}" + (f" {d.year}" if year else "")
+
+
+def fold(summary: str, inner: str) -> str:
+    return f"<details><summary>{esc(summary)}</summary>{inner}</details>"
+
+
+def join_and(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def short_version(res: dict) -> str:
     x = res["experiment"]
-    steps = [s["step"] for s in res["funnel"]["ordered"]]
+    ordered = res["funnel"]["ordered"]
+    steps = [s["step"] for s in ordered]
     idx = steps.index(x["target_step"])
-    prev = steps[idx - 1] if idx else None
-    reached_from = f"that reach &ldquo;{STEP[prev]}&rdquo;" if prev else ""
+    prev = steps[idx - 1] if idx else steps[0]
     row10 = next(g for g in x["grid"] if abs(g["rel_mde"] - 0.10) < 1e-9)
     longest = x["detectable"][-1]
-    test_line = (
-        f"A {longest['days']}-day test on {esc(x['population'])} can detect a lift of "
-        f"<b>{pct(longest['rel_mde'], 0)} or more</b> in session conversion; a 10% lift would need "
-        f"{num(row10['users_per_arm'])} users per arm, about {days(row10['days'])}. So test a change big "
-        f"enough to matter, not a button colour."
+    test = (
+        f"<p>The catch is traffic. With the number of visitors this site gets, a {longest['days']}-day test "
+        f"could only reliably pick up a lift of about {pct(longest['rel_mde'], 0)} or more. Proving a 10% "
+        f"improvement would need {num(row10['users_per_arm'])} people in each group, roughly "
+        f"{days(row10['days'])}. So whatever gets tested should be a real change to the page, not a small "
+        f"tweak.</p>"
     )
     if x["device_specific"]:
         opp = next(o for o in res["opportunity"] if o["step"] == x["target_step"])
         return (
-            f"<p><b>Fix mobile at &ldquo;{STEP[opp['step']]}&rdquo;.</b> Mobile sessions {reached_from} "
-            f"go on to &ldquo;{STEP[opp['step']]}&rdquo; {pct(opp['mobile_rate'])} of the "
-            f"time, against {pct(opp['desktop_rate'])} on desktop (p = {opp['p_value']:.1g}). If mobile matched "
-            f"desktop at this one step, the window would have had about {num(opp['extra_purchases'])} more "
-            f"purchases, roughly {money(opp['extra_revenue_usd'])}.</p>"
-            f"<p>That figure is an <b>upper bound</b>. Part of the gap is probably intent (people browse on "
-            f"phones and buy on laptops), not friction, and only an experiment separates the two. {test_line}</p>"
+            f"<p>Phones are where this store loses sales. Of mobile visits that reach {PROSE[prev]}, "
+            f"{pct(opp['mobile_rate'])} go on to {PROSE[opp['step']]}; on desktop it's {pct(opp['desktop_rate'])}. "
+            f"If phones did as well as desktops at that one step, that would be about "
+            f"{num(opp['extra_purchases'])} more orders over the period, around {money(opp['extra_revenue_usd'])}. "
+            f"I'd treat that as a ceiling, since some people browse on their phone and buy later on a laptop.</p>"
+            + test
         )
     leak = res["leak"]
+    after = ordered[idx + 1:]
     max_gap = max(abs(o["gap_pts"]) for o in res["opportunity"])
+    tail = ""
+    if after:
+        bits = [f"{pct(s['step_rate'], 0)} of those buy" if s["step"] == "purchase"
+                else f"{pct(s['step_rate'], 0)} get to {PROSE[s['step']]}" for s in after]
+        tail = f" Once someone does start {PROSE[leak['step']]}, most of them finish: {join_and(bits)}."
     return (
-        f"<p><b>The biggest leak is &ldquo;{STEP[prev]}&rdquo; to &ldquo;{STEP[leak['step']]}&rdquo;, and it "
-        f"is the same on every device.</b> Only {pct(leak['step_rate'])} of sessions {reached_from} go on to "
-        f"&ldquo;{STEP[leak['step']]}&rdquo;, the lowest rate of any step in the purchase path. Mobile and "
-        f"desktop differ by at most {max_gap * 100:.1f} points at any step and no gap is statistically "
-        f"significant, so this data does not support a device-specific fix.</p><p>{test_line}</p>"
+        f"<p>Most people who look at a product never start checkout. Only {pct(leak['step_rate'])} of visits "
+        f"that reach {PROSE[prev]} go on to {PROSE[leak['step']]}, and that's the biggest drop in the whole "
+        f"purchase path.{tail}</p>"
+        f"<p>It isn't a mobile problem. Phones and desktops are within {max_gap * 100:.1f} points of each other "
+        f"at every step, and none of the differences is statistically significant. If I were running this "
+        f"store, I'd work on the product page for everyone.</p>" + test
     )
 
 
 def render(res: dict) -> str:
     synthetic = res["source"] != "bigquery"
-    h = res["headline"]
-    a = res["audit"]
-    tree = res["metric_tree"]
-    x = res["experiment"]
-    parts = ["<title>GA4 Merchandise Store — Product Readout</title>", f"<style>{CSS}</style>", "<main>"]
-    if synthetic:
-        parts.append('<div class="stamp">SYNTHETIC DATA — NOT FINDINGS. '
-                     "<span>Built from generated events in the GA4 export format to test the pipeline. "
-                     "No number on this page describes the real store.</span></div>")
-    parts.append("<h1>Google Merchandise Store: where the funnel leaks, and how to test the fix</h1>")
-    parts.append(f'<p class="sub">GA4 event export, {esc(a["summary"]["start"])} to {esc(a["summary"]["end"])} · '
-                 f'{num(a["summary"]["events"])} events · source: {esc(res["source"])}</p>')
-    tiles = [("Sessions", num(h["sessions"])), ("Users", num(h["users"])), ("Transactions", num(h["transactions"])),
-             ("Revenue", money(h["revenue_usd"])), ("Conversion", pct(h["conversion"], 2)),
-             ("Order value", money(h["aov"]) if h["aov"] else "n/a")]
-    parts.append('<div class="tiles">' + "".join(f"<div class=tile><b>{v}</b><span>{k}</span></div>" for k, v in tiles)
-                 + "</div>")
-    parts.append(f'<div class="rec">{recommendation(res)}</div>')
-
-    # 0. audit
-    parts.append("<h2>0 · Can this data be trusted?</h2>")
-    parts.append("<p>Google says this sample's internal consistency &ldquo;might be somewhat limited&rdquo;. "
-                 "Every check below runs before anything is built, and a FAIL stops the build.</p>")
-    parts.append(table(["", "Check", "Measured", "What it would break"],
-                       [[c["severity"].upper(), c["name"], c["detail"], c["consequence"]] for c in a["checks"]],
-                       numeric_from=9).replace("<td>WARN</td>", '<td class="sev-warn">WARN</td>')
-                 .replace("<td>FAIL</td>", '<td class="sev-fail">FAIL</td>')
-                 .replace("<td>INFO</td>", '<td class="sev-info">info</td>'))
-
-    # 1. metric tree
-    shares = tree["peak_share"]
-    lead = max(shares, key=lambda c: abs(shares[c])) if shares else None
-    parts.append("<h2>1 · What moves revenue week to week</h2>")
-    parts.append("<p>Revenue = users × sessions per user × conversion × order value. That identity is exact, so "
-                 "the change in log revenue splits into four parts that add up. The baseline is the geometric mean "
-                 f"of the full pre-holiday weeks ({', '.join(tree['baseline_weeks'])}).</p>")
-    zero = next((c for c in a["checks"] if c["name"] == "zero_revenue_purchases"), None)
-    if zero and "most purchases" in zero["detail"]:
-        parts.append(f"<p><b>Revenue stops being trustworthy near the end.</b> {esc(zero['detail'])}. Weeks "
-                     "that run past the last reliable day are left out of this split; conversion, which counts "
-                     "purchases rather than dollars, is unaffected.</p>")
-    if lead:
-        parts.append(f"<p>The peak week, starting {tree['peak_week']}, ran {pct(tree['peak_pct_change'], 0)} above "
-                     f"baseline. The largest part came from <b>{COMP[lead].lower()}</b> "
-                     f"({pct(shares[lead], 0)} of the log change).</p>")
-    parts.append(f'<figure><img alt="Weekly revenue change split into users, sessions per user, conversion and '
-                 f'order value" src="{chart_metric_tree(res)}"><figcaption>Bars: each driver\'s contribution. '
-                 f"Line: total change. Table below has every value.</figcaption></figure>")
-    parts.append(table(["Week", "Revenue", "Users", "Conv.", "AOV"] + [f"Δ {COMP[c]}" for c in COMP] + ["Δ total"],
-                       [[w["week_start"], money(w["revenue_usd"]), num(w["users"]), pct(w["conversion"], 2),
-                         money(w["aov"])] + [f"{w['log_contrib'][c] * 100:+.1f}" for c in COMP]
-                        + [f"{w['log_total'] * 100:+.1f}"] for w in tree["weeks"]]))
-
-    # 2. funnel
-    parts.append("<h2>2 · Where the funnel leaks</h2>")
-    parts.append("<p>The <b>ordered</b> funnel only credits a step reached after the previous one; the "
-                 "<b>open</b> funnel credits it if it happened at all. Where they differ, events arrived out of "
-                 "order.</p>")
+    h, a, tree, x = res["headline"], res["audit"], res["metric_tree"], res["experiment"]
+    s = a["summary"]
     checks = {c["name"]: c for c in a["checks"]}
-    cart = checks.get("add_to_cart_coverage")
-    if cart and cart["severity"] == "warn":
-        parts.append(f"<p><b>Add to cart is not in the chain.</b> {esc(cart['detail'])}. Nobody checks out "
-                     "without a cart, so this is tracking, not shoppers. A funnel through it would show a trend "
-                     "the shoppers never made.</p>")
-    ship = checks.get("checkout_shipping_simultaneous")
-    if ship and ship["severity"] == "warn":
-        parts.append(f"<p><b>Nor is shipping info.</b> {esc(ship['detail'])}. One click fires both events, in "
-                     "random order, so as a step it measures nothing and an ordered funnel would drop real "
-                     "buyers at random.</p>")
-    rows = [[STEP[o["step"]], num(o["sessions"]), pct(o["step_rate"]), pct(p["step_rate"]), pct(o["from_start"], 2)]
-            for o, p in zip(res["funnel"]["ordered"], res["funnel"]["open"])]
-    parts.append(table(["Step", "Sessions (ordered)", "Step rate", "Step rate (open)", "Of all sessions"], rows))
-    parts.append(f'<figure><img alt="Funnel step rates, desktop vs mobile" src="{chart_funnel_by_device(res)}">'
-                 "<figcaption>Step rate by device. Labelled: the step the recommendation is about."
-                 "</figcaption></figure>")
-    parts.append("<h3>Sizing each step's mobile gap</h3>")
-    parts.append("<p>Not &ldquo;what if step X improved 10%&rdquo;: in a multiplicative funnel a 10% lift at any "
-                 "step gives exactly 10% more purchases, so that cannot rank steps. Instead: what if mobile matched "
-                 "desktop at this step?</p>")
-    parts.append(table(["Step", "Mobile", "Desktop", "Gap", "p-value", "Extra purchases", "Extra revenue"],
-                       [[STEP[o["step"]], pct(o["mobile_rate"]), pct(o["desktop_rate"]), f"{o['gap_pts'] * 100:+.1f} pts",
-                         f"{o['p_value']:.2g}", num(o["extra_purchases"]), money(o["extra_revenue_usd"])]
-                        for o in res["opportunity"]]))
 
-    # 3. retention
-    r = res["retention"]
-    wsum = r["weighted"]
-    parts.append("<h2>3 · Do new users come back?</h2>")
-    parts.append("<p>Only users whose first session in the window is their first session ever form a cohort; "
-                 "someone first seen on session 5 is a returning customer from before the data starts. Weeks the "
-                 "data does not fully cover are left blank, not counted as zero.</p>")
-    if "week_1" in wsum:
-        parts.append(f"<p>Across cohorts, {pct(wsum['week_1'])} of new users return in week 1"
-                     + (f" and {pct(wsum['week_4'])} in week 4" if "week_4" in wsum else "") + ".</p>")
-    parts.append(f'<figure><img alt="Weekly new-user retention heatmap" src="{chart_retention(res)}">'
-                 "<figcaption>Share of each cohort active k weeks later (week 0 is 100% and omitted).</figcaption>"
-                 "</figure>")
-    parts.append(table(["Cohort", "Users"] + [f"W{k}" for k in r["offsets"][1:9]],
-                       [[c, num(r["cohort_users"][c])] + [pct(v) if v is not None else "" for v in row[1:9]]
-                        for c, row in zip(r["cohorts"], r["matrix"])]))
+    def warned(name: str) -> bool:
+        return checks.get(name, {}).get("severity") == "warn"
 
-    # 4. channels
-    parts.append("<h2>4 · Which channels bring buyers</h2>")
-    parts.append("<p>&ldquo;Obfuscated&rdquo; is the sample's own <code>&lt;Other&gt;</code> and "
-                 "<code>(data deleted)</code>, kept as a bucket rather than guessed at. Overlapping intervals "
-                 "mean the data cannot rank those channels. &ldquo;Unknown&rdquo; is a returning visit that "
-                 "carries no source of its own; the user's first-touch source is not used as a stand-in "
-                 "(DECISIONS D-07).</p>")
-    small = [c["channel"] for c in res["channels"] if c["sessions"] < CHART_MIN_SESSIONS]
-    caption = (f"<figcaption>Channels under {num(CHART_MIN_SESSIONS)} sessions ({esc(', '.join(small))}) are "
-               "in the table only: their intervals are too wide to share an axis.</figcaption>") if small else ""
-    parts.append(f'<figure><img alt="Session conversion by channel with 95% intervals" src="{chart_channels(res)}">'
-                 f"{caption}</figure>")
-    parts.append(table(["Channel", "Sessions", "Share", "Engaged", "Conversion", "95% interval", "Revenue / session"],
-                       [[c["channel"], num(c["sessions"]), pct(c["share"]), pct(c["engaged_rate"]),
-                         pct(c["conversion"], 2), f"{pct(c['conversion_ci'][0], 2)} – {pct(c['conversion_ci'][1], 2)}",
-                         f"${c['revenue_per_session']:.2f}"] for c in res["channels"]]))
+    def facts(name: str) -> dict:
+        return checks.get(name, {}).get("facts") or {}
 
-    # 5. experiment
+    parts = ["<title>Where the Google Merchandise Store loses its shoppers</title>", f"<style>{CSS}</style>", "<main>"]
+    if synthetic:
+        parts.append('<p class="stamp">This page was built from generated test data, not the real store. '
+                     "None of these numbers mean anything yet.</p>")
+    parts.append("<h1>Where the Google Merchandise Store loses its shoppers</h1>")
+    parts.append(f'<p class="byline">Ankit Singathia &middot; GA4 data, {day(s["start"], True)} to '
+                 f'{day(s["end"], True)}</p>')
+    parts.append(
+        f"<p>I looked at three months of events from Google's online merch store, using the public sample of its "
+        f"Google Analytics 4 export. That's {num(s['events'])} events from {num(h['users'])} people over "
+        f"{num(h['sessions'])} visits, ending in {num(h['transactions'])} orders worth {money(h['revenue_usd'])}. "
+        f"About {pct(h['conversion'], 1)} of visits ended in an order, and the average order was "
+        f"{money(h['aov']) if h['aov'] else 'n/a'}.</p>"
+    )
+
+    parts.append("<h2>The short version</h2>")
+    parts.append(short_version(res))
+
+    # ---- data trust ------------------------------------------------------
+    parts.append("<h2>Before trusting any of it</h2>")
+    problems = []
+    if warned("add_to_cart_coverage"):
+        f = facts("add_to_cart_coverage")
+        if f.get("changed") and f.get("first_tracked_week"):
+            problems.append(
+                f"Add-to-cart wasn't tracked at first. It barely appears until the week of "
+                f"{day(f['first_tracked_week'])}, and even after that it shows up in at most "
+                f"{f['max_weekly']:.0%} of checkout visits. You can't check out without a cart, so this is "
+                "missing tracking rather than missing shoppers, and I left it out of the funnel.")
+        else:
+            problems.append(
+                f"Add-to-cart shows up in only {checks['add_to_cart_coverage']['value']:.0%} of checkout visits. "
+                "You can't check out without a cart, so the tracking is incomplete, and I left the step out of "
+                "the funnel.")
+    if warned("checkout_shipping_simultaneous"):
+        f = facts("checkout_shipping_simultaneous")
+        problems.append(
+            f"The shipping-details event fires at the same moment as checkout. In {num(f['ship_first'])} of "
+            f"{num(f['both'])} visits it's even logged a fraction of a second earlier. Put in strict order, the "
+            "funnel was dropping real buyers for no reason, so I took this step out as well.")
+    first_bad = facts("zero_revenue_purchases").get("first_bad_day")
+    if warned("zero_revenue_purchases") and first_bad:
+        last_good = date.fromisoformat(first_bad) - timedelta(days=1)
+        problems.append(
+            f"Revenue stops being recorded properly at the very end. From {day(first_bad)}, most orders come "
+            f"through at $0. Order counts are still fine, but I don't use revenue after {day(last_good)}.")
+    if problems:
+        n = len(problems)
+        parts.append("<p>Google warns that this sample isn't fully consistent, so I checked the data before "
+                     f"building anything on it. Most of it held up, but {WORDS.get(n, n)} "
+                     f"thing{'s were' if n > 1 else ' was'} broken:</p>")
+        parts.append("<ol>" + "".join(f"<li>{p}</li>" for p in problems) + "</ol>")
+    else:
+        parts.append("<p>I checked the data before building anything on it, and nothing in it looked broken.</p>")
+    dup = checks.get("duplicate_purchase_rows", {}).get("value", 0)
+    no_id = checks.get("not_set_transaction_ids", {}).get("value", 0)
+    if dup:
+        parts.append(f"<p>I also removed {num(dup)} purchase records that had been sent twice. {num(no_id)} "
+                     "purchase records have no order ID, so I matched duplicates on the visit and the amount "
+                     "instead.</p>")
+    audit_table = table(["", "Check", "Measured", "What it would break"],
+                        [[c["severity"].upper(), c["name"], c["detail"], c["consequence"]] for c in a["checks"]],
+                        numeric_from=9).replace("<td>WARN</td>", '<td class="sev-warn">WARN</td>') \
+        .replace("<td>FAIL</td>", '<td class="sev-fail">FAIL</td>') \
+        .replace("<td>INFO</td>", '<td class="sev-info">ok</td>')
+    parts.append(fold(f"All {len(a['checks'])} checks the build runs", audit_table))
+
+    # ---- revenue ---------------------------------------------------------
+    parts.append("<h2>Holiday revenue</h2>")
+    pc = tree["peak_pct_change"]
+    size = f"{1 + pc:.1f} times" if pc >= 0.5 else f"{pct(pc, 0)} above"
+    bf = "" if tree["peak_week"] == BLACK_FRIDAY_WEEK else ", not Black Friday week"
+    shares = tree["peak_share"]
+    gains = sorted(((c, v) for c, v in shares.items() if v > 0), key=lambda cv: -cv[1])
+    if len(gains) >= 2 and all(0.35 <= v <= 0.65 for _, v in gains[:2]):
+        split = f" Roughly half of that came from {GAIN[gains[0][0]]} and half from {GAIN[gains[1][0]]}."
+    elif gains:
+        split = f" Most of it came from {GAIN[gains[0][0]]}."
+    else:
+        split = ""
+    flat_aov = " Order size hardly changed." if abs(shares.get("aov", 1)) < 0.1 else ""
+    parts.append(f"<p>The busiest week was the one starting {day(tree['peak_week'])}{bf}. Revenue that week was "
+                 f"{size} the level of early November.{split}{flat_aov}</p>")
+    low = min(tree["weeks"], key=lambda w: w["log_total"])
+    if low["log_total"] < 0:
+        worst = min(low["log_contrib"], key=low["log_contrib"].get)
+        parts.append(f"<p>The quietest week started {day(low['week_start'])}, at {pct(1 + low['pct_change'], 0)} of "
+                     f"the early-November level, mostly because of {LOSS[worst]}.</p>")
+    left_out = (" The last week of January is left out because of the revenue problem above."
+                if first_bad and warned("zero_revenue_purchases") else "")
+    parts.append("<p class=small>How I split it: revenue = visitors &times; visits per visitor &times; share of "
+                 "visits that buy &times; order size. That's an exact identity, so on a log scale the four "
+                 "changes add up to the total. The baseline is the average of the full weeks before Black Friday "
+                 f"week ({join_and([day(w) for w in tree['baseline_weeks']])}).{left_out}</p>")
+    parts.append(f'<figure><img alt="Weekly revenue change split into visitors, visits per visitor, conversion '
+                 f'and order size" src="{chart_metric_tree(res)}"><figcaption>Each bar is one week, split into '
+                 "the four parts; the line is the total change.</figcaption></figure>")
+    parts.append(fold("Week-by-week numbers", table(
+        ["Week", "Revenue", "Users", "Conv.", "AOV"] + [f"Δ {COMP[c]}" for c in COMP] + ["Δ total"],
+        [[w["week_start"], money(w["revenue_usd"]), num(w["users"]), pct(w["conversion"], 2), money(w["aov"])]
+         + [f"{w['log_contrib'][c] * 100:+.1f}" for c in COMP] + [f"{w['log_total'] * 100:+.1f}"]
+         for w in tree["weeks"]])))
+
+    # ---- funnel ----------------------------------------------------------
+    ordered, opened = res["funnel"]["ordered"], res["funnel"]["open"]
+    route = f"from {PROSE[ordered[0]['step']]} to " + ", to ".join(PROSE[o["step"]] for o in ordered[1:])
+    dropped = [name for name, key in (("add-to-cart", "add_to_cart_coverage"),
+                                      ("shipping details", "checkout_shipping_simultaneous")) if warned(key)]
+    left = ""
+    if dropped:
+        left = f" {join_and(dropped).capitalize()} {'are' if len(dropped) > 1 else 'is'} left out, for the reasons above."
+    parts.append("<h2>The purchase path</h2>")
+    parts.append(f"<p>The funnel goes {route}. A visit only counts at a step if it got there after the step "
+                 f"before; the looser count next to it accepts the events in any order.{left}</p>")
+    parts.append(table(["Step", "Visits", "Share of previous step", "Looser count", "Share of all visits"],
+                       [[STEP[o["step"]], num(o["sessions"]), pct(o["step_rate"]), pct(p["step_rate"]),
+                         pct(o["from_start"], 2)] for o, p in zip(ordered, opened)]))
+    parts.append("<h3>Phones versus desktops</h3>")
+    sig = [o for o in res["opportunity"] if o["significant"]]
+    max_gap = max(abs(o["gap_pts"]) for o in res["opportunity"])
+    if sig:
+        o = sig[0]
+        parts.append(f"<p>Phones fall behind at {PROSE[o['step']]}: {pct(o['mobile_rate'])} of mobile visits make "
+                     f"it, against {pct(o['desktop_rate'])} on desktop."
+                     + (" It's the only step where the gap is statistically significant." if len(sig) == 1 else "")
+                     + "</p>")
+    else:
+        parts.append(f"<p>I went in expecting mobile to do worse. It doesn't: at every step phones and desktops "
+                     f"are within {max_gap * 100:.1f} points of each other, and none of the differences is "
+                     "significant.</p>")
+    parts.append(f'<figure><img alt="Share of visits reaching each step, phones and desktops" '
+                 f'src="{chart_funnel_by_device(res)}"><figcaption>Share of visits at each step that make it to '
+                 "the next, phones and desktops side by side.</figcaption></figure>")
+    parts.append("<p class=small>I sized each step by comparing phones with desktops rather than asking what a 10% "
+                 "improvement would be worth. When every step multiplies the one before, a 10% gain anywhere gives "
+                 "exactly 10% more orders, so that question can't tell you where to look.</p>")
+    parts.append(fold("Device gap at each step", table(
+        ["Step", "Mobile", "Desktop", "Gap", "p-value", "Extra orders", "Extra revenue"],
+        [[STEP[o["step"]], pct(o["mobile_rate"]), pct(o["desktop_rate"]), f"{o['gap_pts'] * 100:+.1f} pts",
+          f"{o['p_value']:.2g}", num(o["extra_purchases"]), money(o["extra_revenue_usd"])]
+         for o in res["opportunity"]])))
+
+    # ---- retention -------------------------------------------------------
+    r, w = res["retention"], res["retention"]["weighted"]
+    low_ret = w.get("week_1", 1.0) < 0.10
+    parts.append(f"<h2>{'Most new visitors never come back' if low_ret else 'Returning visitors'}</h2>")
+    if "week_1" in w:
+        parts.append(
+            f"<p>Of people on their first ever visit, {pct(w['week_1'])} came back the following week"
+            + (f" and {pct(w['week_4'])} four weeks later" if "week_4" in w else "") + "."
+            + (" That's low, though maybe not surprising for a merch store that a lot of people visit once, for "
+               "a gift or a conference shirt. It does mean most sales have to happen on the first visit."
+               if low_ret else "") + "</p>")
+    parts.append("<p class=small>I only counted someone as new if their first visit in the data was their first "
+                 "visit ever, and I left out weeks the data doesn't fully cover instead of counting them as "
+                 "zero.</p>")
+    parts.append(f'<figure><img alt="Weekly new-visitor retention" src="{chart_retention(res)}">'
+                 "<figcaption>Each row is the group of people who first visited that week; darker means more of "
+                 "them came back.</figcaption></figure>")
+    parts.append(fold("Retention by cohort", table(
+        ["Cohort", "Users"] + [f"W{k}" for k in r["offsets"][1:9]],
+        [[c, num(r["cohort_users"][c])] + [pct(v) if v is not None else "" for v in row[1:9]]
+         for c, row in zip(r["cohorts"], r["matrix"])])))
+
+    # ---- channels --------------------------------------------------------
+    ch = res["channels"]
+    parts.append("<h2>Where buyers come from</h2>")
+    named = [c for c in ch if c["sessions"] >= CHART_MIN_SESSIONS
+             and c["channel"] not in ("Unknown", "Obfuscated", "Other")]
+    if len(named) >= 2:
+        best = max(named, key=lambda c: c["conversion"])
+        worst = min(named, key=lambda c: c["conversion"])
+        direct = next((c for c in named if c["channel"] == "Direct"), None)
+        below = (f", even below people who typed the address in directly ({pct(direct['conversion'], 1)})"
+                 if direct and worst is not direct and worst["conversion"] < direct["conversion"] else "")
+        text = (f"<p>{esc(best['channel'])} traffic converts best, with {pct(best['conversion'], 1)} of visits "
+                f"ending in an order. {esc(worst['channel'])} is the weakest at {pct(worst['conversion'], 1)}{below}.")
+        for c in ch:
+            if c["sessions"] < CHART_MIN_SESSIONS and c["conversion"] > best["conversion"]:
+                text += (f" {esc(c['channel'])} looks even better ({pct(c['conversion'], 1)}), but that's from only "
+                         f"{num(c['sessions'])} visits, so I wouldn't lean on it.")
+        parts.append(text + "</p>")
+    parts.append("<p class=small>&ldquo;Obfuscated&rdquo; is traffic Google hid in this sample, and "
+                 "&ldquo;Unknown&rdquo; is a return visit that didn't carry its own source. I kept both in view "
+                 "rather than guessing where they came from.</p>")
+    small = [c["channel"] for c in ch if c["sessions"] < CHART_MIN_SESSIONS]
+    caption = (f" Channels with fewer than {num(CHART_MIN_SESSIONS)} visits ({esc(join_and(small))}) are only in "
+               "the table, because their ranges are too wide to share the chart." if small else "")
+    parts.append(f'<figure><img alt="Conversion by channel with 95% ranges" src="{chart_channels(res)}">'
+                 f"<figcaption>Dots are conversion rates; lines show the 95% range.{caption}</figcaption></figure>")
+    parts.append(fold("Channel numbers", table(
+        ["Channel", "Visits", "Share", "Engaged", "Conversion", "95% range", "Revenue / visit"],
+        [[c["channel"], num(c["sessions"]), pct(c["share"]), pct(c["engaged_rate"]), pct(c["conversion"], 2),
+          f"{pct(c['conversion_ci'][0], 2)} – {pct(c['conversion_ci'][1], 2)}", f"${c['revenue_per_session']:.2f}"]
+         for c in ch])))
+
+    # ---- experiment ------------------------------------------------------
     aa, cu = x["aa"], x["cuped"]
-    parts.append("<h2>5 · Designing the test</h2>")
-    parts.append("<p><b>This dataset contains no experiment, and none is simulated as if it were real.</b> This "
-                 "section answers what has to be settled before launch, using the real baselines above.</p>")
-    parts.append(f"<p>Population: {esc(x['population'])} in the post-holiday window ({num(x['window_users'])} users). "
-                 f"Metric: {esc(x['metric'])}. Baseline {pct(x['baseline_rate'], 2)}, "
-                 f"{x['sessions_per_user']:.2f} sessions per user.</p>")
-    parts.append(table(["Relative lift to detect", "Users per arm", "Time to enrol both arms",
-                        "Naive sessions per arm", "Design effect"],
-                       [[pct(g["rel_mde"], 0), num(g["users_per_arm"]), days(g["days"]),
-                         num(g["naive_sessions_per_arm"]), f"{g['design_effect']:.2f}×"] for g in x["grid"]]))
-    parts.append("<p class=note>α = 0.05 two-sided, power 0.80. Design effect above 1× means a calculation that "
-                 "treats sessions as independent would under-power the test.</p>")
-    parts.append("<p>Turned around, the question a team actually asks: " + "; ".join(
-        f"a {d['days']}-day test ({num(d['users_per_arm'])} users per arm) can detect a lift of "
-        f"<b>{pct(d['rel_mde'], 0)}</b> or more" for d in x["detectable"]) + ".</p>")
-    parts.append("<h3>Would the analysis cry wolf? An A/A test on real users</h3>")
-    parts.append(f"<p>Real users were split at random {num(aa['n_sims'])} times with no treatment. A correct test "
-                 f"calls {pct(aa['alpha'], 0)} of those splits significant. The delta method did so "
-                 f"{pct(aa['fpr_delta'])} of the time; the naive session-level test {pct(aa['fpr_naive'])}.</p>")
-    parts.append(f'<figure><img alt="A/A false-positive rates" src="{chart_aa(res)}"><figcaption>Whiskers: 95% '
-                 "interval over the simulations.</figcaption></figure>")
-    parts.append("<h3>Would CUPED help here?</h3>")
-    with_hist = cu["conversions_with_history"]
-    parts.append(f"<p>CUPED uses each user's pre-period behaviour to cancel noise. Only "
-                 f"{pct(cu['share_with_history'])} of users in the window have any pre-period history, so it cuts "
-                 f"variance by {pct(cu['conversions_all']['variance_reduction'])} for conversions and "
-                 f"{pct(cu['revenue_all']['variance_reduction'])} for revenue across all users"
-                 + (f", and {pct(with_hist['variance_reduction'])} among users with history" if with_hist else "")
-                 + ". Worth it for logged-in or returning-customer tests; not for a new-visitor checkout test.</p>")
-    parts.append("<p class=note>Guardrail before reading any real result: a sample-ratio check on the arm split "
-                 "(chi-square, stop if p &lt; 0.001).</p>")
-    parts.append('<p class=note>Every rule behind these numbers is in <code>docs/DECISIONS.md</code>.</p></main>')
+    longest = x["detectable"][-1]
+    who = "users" if x["population"] == "all users" else x["population"]
+    parts.append("<h2>If I were to test a fix</h2>")
+    parts.append("<p>There's no A/B test in this data, so I haven't invented one. What I can do is work out what a "
+                 "real test would need, using the store's own numbers.</p>")
+    parts.append(f"<p>I'd measure the share of visits that end in an order, and split by person so the same person "
+                 f"always sees the same version. In the {longest['days']} days after the holidays there were "
+                 f"{num(x['window_users'])} {esc(who)}, {pct(x['baseline_rate'], 2)} of visits converted, and people "
+                 f"averaged {x['sessions_per_user']:.1f} visits each.</p>")
+    reach = [f"{pct(d['rel_mde'], 0)} after {WEEKS.get(d['days'], str(d['days']) + ' days')}" for d in x["detectable"]]
+    parts.append(f"<p>With that traffic, the smallest lift a test could reliably catch is about {join_and(reach)}.</p>")
+    parts.append(fold("Sample sizes for different lifts", table(
+        ["Lift to detect", "Users per group", "Time to fill both groups", "Visits needed if treated as independent",
+         "Design effect"],
+        [[pct(g["rel_mde"], 0), num(g["users_per_arm"]), days(g["days"]), num(g["naive_sessions_per_arm"]),
+          f"{g['design_effect']:.2f}×"] for g in x["grid"]])
+        + "<p class=small>Two-sided test at 5% significance with 80% power. A design effect above 1 means "
+          "treating visits as independent would leave the test too small.</p>"))
+
+    parts.append("<h3>Checking the statistics on fake tests</h3>")
+    lo = aa["fpr_naive_ci"][0]
+    if lo > aa["alpha"]:
+        verdict = " So the simpler test really does overstate results on this traffic."
+    elif abs(aa["fpr_naive"] - aa["alpha"]) <= 0.015:
+        verdict = (f" Here the simpler test gets away with it because people average only "
+                   f"{x['sessions_per_user']:.1f} visits each. It breaks down when people visit more often, which is "
+                   "why I'd still use the delta method.")
+    else:
+        verdict = ""
+    parts.append(f"<p>To check the maths, I split real users into two random groups {num(aa['n_sims'])} times, "
+                 f"with nothing different between the groups. A correct test should call about "
+                 f"{pct(aa['alpha'], 0)} of those splits significant just by chance. The delta method, which treats "
+                 f"each person rather than each visit as the unit, flagged {pct(aa['fpr_delta'])}. A simpler test "
+                 f"that treats every visit as independent flagged {pct(aa['fpr_naive'])}.{verdict}</p>")
+    parts.append(f'<figure><img alt="False-positive rate over fake tests" src="{chart_aa(res)}"><figcaption>How '
+                 "often each method called a fake test significant; the lines show the 95% range.</figcaption>"
+                 "</figure>")
+    parts.append("<h3>Using past behaviour (CUPED)</h3>")
+    vr = cu["conversions_all"]["variance_reduction"]
+    parts.append(f"<p>CUPED cuts noise by adjusting for what each person did before the test. Only "
+                 f"{pct(cu['share_with_history'])} of these users had visited before, so it would reduce the noise by "
+                 f"about {pct(vr)}"
+                 + (". That isn't worth the extra complexity here, though it would be for a test aimed at returning "
+                    "customers.</p>" if vr < 0.05 else ", which is worth having.</p>"))
+    parts.append("<p class=small>One more thing I'd check before reading any real result: that the two groups came "
+                 "out the size they were meant to be (a chi-square test on the split; stop and investigate if p is "
+                 "below 0.001).</p>")
+    parts.append(f'<p class=small>The rules behind every number are in <a href="{REPO_URL}/blob/main/docs/'
+                 f'DECISIONS.md">DECISIONS.md</a>, and the code is on <a href="{REPO_URL}">GitHub</a>.</p></main>')
     return "\n".join(parts)
 
 

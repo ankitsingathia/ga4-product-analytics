@@ -128,3 +128,10 @@ def test_full_analysis_runs_and_serialises(built):
     assert res["source"] == "synthetic"
     assert res["experiment"]["target_step"] == "purchase"
     assert 0.02 <= res["experiment"]["aa"]["fpr_delta"] <= 0.09
+
+    from gpa import readout
+
+    page = readout.render(json.loads(json.dumps(res, default=analysis._json_default)))
+    assert "generated test data" in page
+    # House style for the write-up: plain punctuation, no em dashes.
+    assert "—" not in page

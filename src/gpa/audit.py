@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import duckdb
@@ -33,6 +33,9 @@ class Check:
     detail: str
     severity: str  # "info" | "warn" | "fail"
     consequence: str
+    # Structured values behind `detail`, for checks the readout explains in
+    # plain sentences (dates, counts) rather than quoting the detail string.
+    facts: dict = field(default_factory=dict)
 
 
 def _connect(raw: Path) -> duckdb.DuckDBPyConnection:
@@ -201,6 +204,13 @@ def run(raw: Path) -> dict:
         "jumps between weeks is a tracking change. A funnel through it would show a trend shoppers never "
         "made. add_to_cart is kept out of the funnel chain.",
     ))
+    checks[-1].facts = {
+        "changed": changed,
+        "first_tracked_week": str(next((wk for wk, r in rates if r >= 0.10), "")),
+        "first_majority_week": str(next((wk for wk, r in rates if r > 0.5), "")),
+        "min_weekly": lo,
+        "max_weekly": hi,
+    }
 
     both, near, ship_first = one("""
         with f as (
@@ -225,6 +235,7 @@ def run(raw: Path) -> dict:
         "Two events fired by one action, in random order: an ordered funnel would drop sessions at random "
         "and the step rate would measure nothing. add_shipping_info is kept out of the funnel chain.",
     ))
+    checks[-1].facts = {"both": both, "near": near, "ship_first": ship_first}
 
     by_day = con.execute("""
         select event_date, count(*), count(*) filter (where purchase_revenue_usd = 0)
@@ -241,6 +252,12 @@ def run(raw: Path) -> dict:
         "A $0 purchase still counts as a transaction, so revenue and AOV sink while conversion does not. "
         "Weeks past dbt's revenue_reliable_through are left out of the revenue decomposition.",
     ))
+    checks[-1].facts = {
+        "first_bad_day": str(bad_days[0]) if bad_days else None,
+        "last_bad_day": str(bad_days[-1]) if bad_days else None,
+        "zero_rows": zero_rows,
+        "purchase_rows": p_rows,
+    }
 
     censored, measured = one("""
         select count(*) filter (where first_sn > 1), count(*)
