@@ -12,9 +12,20 @@ peak, do new visitors come back, and how would you test a fix properly?
 The data covers 4,295,584 events from 270,154 people over 360,129 visits, ending
 in 5,298 orders worth $339,343.
 
-- **Most people who look at a product never start checkout.** Only 14.0% of
-  visits that reach a product page go on to checkout (10,807 of 77,020). Once
-  people start checkout, most finish: 61% get to payment and 71% of those buy.
+- **Most people who look at products never start checkout.** Only 14.0% of
+  visits that look at any products (a product page or a category listing) go
+  on to checkout (10,807 of 77,020). Once people start checkout, most finish:
+  61% get to payment and 71% of those buy.
+- **The drop is worst in five parts of the store.** Visits that start in
+  Accessories reach checkout 2.7% of the time, against 14.1% for a typical
+  section, and Bags, Office, Drinkware and Shop by Brand are also well below.
+  If they matched the typical section, that's roughly 685 more orders over the
+  three months, about $41,700. That's a ceiling, since some of these are
+  add-ons people browse without meaning to buy, but it's a specific place to
+  start.
+- **One page looks broken.** Visits that start on the Super G Unisex Joggers
+  page reach checkout 58% of the time, but only 3.6% of those checkouts end in
+  an order, against 43% across the site.
 - **It isn't a mobile problem.** Phones (14.2%) and desktops (13.9%) are within
   about a point of each other at every step, and none of the gaps is
   statistically significant.
@@ -44,7 +55,8 @@ anything. Three problems turned up.
 
 I also removed 394 purchase records that had been sent twice. 906 purchase
 records have no order ID, so duplicates are matched on the visit and the amount
-instead.
+instead. And item IDs differ between product views and checkouts, so anything
+item-level has to go by product name or page URL.
 
 ## How it's built
 

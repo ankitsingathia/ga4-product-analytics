@@ -35,6 +35,7 @@ def load(db: Path) -> dict[str, pd.DataFrame]:
         "fct_weekly_metrics": "week_start",
         "fct_cohort_retention": "cohort_week, week_offset",
         "fct_user_windows": "user_pseudo_id",
+        "fct_area_funnel": "entry_area",
     }
     with duckdb.connect(str(db), read_only=True) as con:
         return {t: con.execute(f"select * from {t} order by {key}").df() for t, key in tables.items()}
@@ -106,6 +107,76 @@ def biggest_leak(ordered: list[dict]) -> dict:
     browsing, not leaking out of a purchase it had started.
     """
     return min(ordered[1:], key=lambda s: s["step_rate"])
+
+
+AREA_MIN_SESSIONS = 1_000
+AREA_LABELS = {"store.html": "Store home page", "asearch.html": "Search results"}
+
+
+def area_label(raw: str) -> str:
+    """'Shop+by+Brand' -> 'Shop by Brand', 'eco+friendly' -> 'Eco friendly'."""
+    if raw in AREA_LABELS:
+        return AREA_LABELS[raw]
+    s = str(raw).replace("+", " ").strip()
+    return s[:1].upper() + s[1:] if s else "Unknown"
+
+
+def area_opportunity(areas: pd.DataFrame) -> dict:
+    """Size the checkout gap by store section against the typical section.
+
+    Benchmark: the median checkout rate of sections with enough visits. A
+    section counts as clearly below only if its whole 95% interval sits under
+    the median. Extra orders use the section's own checkout-to-purchase rate,
+    and revenue its own order value from the days revenue can be trusted.
+    It is an upper bound: some sections are browsed for add-ons, not bought from.
+
+    A section whose checkouts finish at under half the site-wide rate is
+    flagged separately as a possibly broken checkout.
+    """
+    df = areas.copy()
+    df["label"] = df["entry_area"].map(area_label)
+    site_checkouts = float(df["checkouts"].sum())
+    site_finish = float(df["purchase_sessions"].sum()) / site_checkouts if site_checkouts else 0.0
+    big = df[(df["sessions"] >= AREA_MIN_SESSIONS) & (df["label"] != "Unknown")]
+    empty = {"rows": [], "median": None, "extra_orders": 0.0, "extra_revenue_usd": 0.0,
+             "site_finish_rate": site_finish, "min_sessions": AREA_MIN_SESSIONS,
+             "sessions_in_small_sections": int(df["sessions"].sum())}
+    if len(big) < 3:
+        return empty
+
+    median = float((big["checkouts"] / big["sessions"]).median())
+    rows = []
+    for _, r in big.iterrows():
+        n, k = float(r["sessions"]), float(r["checkouts"])
+        rate = k / n
+        lo, hi = xp.wilson(k, n)
+        finish = float(r["purchase_sessions"]) / k if k else 0.0
+        reliable = float(r["purchase_sessions_reliable"])
+        order_value = float(r["revenue_reliable_usd"]) / reliable if reliable else None
+        below = hi < median
+        extra_orders = n * (median - rate) * finish if below else 0.0
+        rows.append({
+            "label": r["label"],
+            "sessions": int(n),
+            "checkout_rate": rate,
+            "checkout_ci": [lo, hi],
+            "finish_rate": finish,
+            "order_value": order_value,
+            "clearly_below": bool(below),
+            "extra_orders": extra_orders,
+            "extra_revenue_usd": extra_orders * (order_value or 0.0),
+            "broken_checkout": bool(k >= 30 and finish < 0.5 * site_finish),
+        })
+    rows.sort(key=lambda r: -r["sessions"])
+    return {
+        "rows": rows,
+        "median": median,
+        "extra_orders": sum(r["extra_orders"] for r in rows),
+        "extra_revenue_usd": sum(r["extra_revenue_usd"] for r in rows),
+        "site_finish_rate": site_finish,
+        "min_sessions": AREA_MIN_SESSIONS,
+        "sessions_in_small_sections": int(df["sessions"].sum() - big["sessions"].sum()),
+    }
 
 
 def metric_tree(weekly: pd.DataFrame) -> dict:
@@ -273,6 +344,7 @@ def analyse(db: Path, audit: dict, n_sims: int = 1000) -> dict:
             "aov": float(everyone["revenue_usd"]) / float(everyone["purchases"]) if everyone["purchases"] else None,
         },
         "leak": leak,
+        "areas": area_opportunity(t["fct_area_funnel"]),
         "funnel": {
             "ordered": ordered,
             "open": funnel_steps(everyone, "any"),

@@ -146,6 +146,13 @@ table the analysis reads is loaded with an explicit `ORDER BY`, because the A/A
 simulation assigns arms by row position; unordered, the same data gave a
 different false-positive rate on each build.
 
+## D-15 · Synthetic data never becomes a finding
+
+`gpa.synth` writes events in the exact extract schema, with every quirk the
+audit hunts for planted at a known rate, and records the realised counts in
+`truth.json`. The tests demand exact recovery. A readout built from synthetic
+data is stamped on screen, written to `out/`, and refused under `docs/`.
+
 ## D-16 · add_to_cart is left out of the funnel chain: its tracking was switched on mid-window
 
 Measured on the real extract. Share of `begin_checkout` sessions that also
@@ -185,11 +192,45 @@ experiment window ends on 24 January.
   `add_to_cart` tracking switched on. The store's tracking was changed that
   week; the readout says so rather than reading either signal as behaviour.
 
-## D-15 · Synthetic data never becomes a finding
+## D-19 · What the item data can and can't do
 
-## D-15 · Synthetic data never becomes a finding
+Measured on the real extract before building anything item-level:
 
-`gpa.synth` writes events in the exact extract schema, with every quirk the
-audit hunts for planted at a known rate, and records the realised counts in
-`truth.json`. The tests demand exact recovery. A readout built from synthetic
-data is stamped on screen, written to `out/`, and refused under `docs/`.
+- `view_item` fires on product pages and category listings alike, carrying up
+  to 12 items. Only 3.6% of view events have a single item, and listing URLs
+  such as `/Google+Redesign/Apparel` carry 12. So the funnel's first step is
+  "looked at products", not "opened a product page", and the write-up says so.
+- Item IDs do not link across events. Views use SKU-style IDs
+  (`GGOEYXXX1207`), checkouts use numeric ones (`9200710`), and 0 of 18,876
+  checked-out item-visits match a viewed ID. Item names do link: 15,224 of
+  17,858 (85%).
+- Category names follow two schemes by event type. Views and `add_to_cart`
+  use paths (`Home/Apparel/Men's / Unisex/`); checkout and purchase use plain
+  names (`Men's / Unisex`).
+
+So the store-section analysis (D-20) uses the page URL of a visit's first
+product view, not the items or categories on the event.
+
+## D-20 · Store sections are sized against the typical section
+
+Each visit counts once, in the section where it first looked at products (the
+second path segment of the page URL). Sections need at least 1,000 visits. The
+benchmark is the median checkout rate across sections, 14.1%. A section is
+"clearly below" only if its whole 95% range sits under the median. Extra orders
+= visits × gap × that section's own checkout-to-purchase rate; extra revenue
+uses that section's order value from the days revenue can be trusted (D-18).
+
+- **Result:** five sections are clearly below: Accessories 2.7%, Bags 3.8%,
+  Office 3.8%, Drinkware 6.6% and Shop by Brand 8.6%. Matching the typical
+  section would add about 685 orders, around $41,700 over the three months.
+- **Stated as an upper bound:** accessories and drinkware are often browsed as
+  add-ons with no intent to buy. The figure says where to look, not what a fix
+  is worth.
+- **Rejected:** crediting the category of the first item viewed (view events
+  list up to 12 items), and crediting every section a visit touched (a visit
+  would count several times, so the gaps could not be summed).
+- **Flagged separately:** visits that start on the Super G Unisex Joggers page
+  reach checkout 58% of the time, but only 3.6% of those checkouts finish,
+  against 43% site-wide. Their checkout events fire on the same page as
+  everyone else's (`/yourinfo.html`), so this is not a mis-tagged event. The
+  write-up calls it a checkout to investigate and does not guess the cause.

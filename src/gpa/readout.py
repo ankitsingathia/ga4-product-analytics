@@ -33,7 +33,7 @@ SEQ = LinearSegmentedColormap.from_list(
     "seq_blue", ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"])
 
 STEP = {
-    "view_item": "Product page", "add_to_cart": "Cart", "begin_checkout": "Checkout",
+    "view_item": "Viewed products", "add_to_cart": "Cart", "begin_checkout": "Checkout",
     "add_shipping_info": "Shipping details", "add_payment_info": "Payment", "purchase": "Purchase",
 }
 COMP = {"users": "Visitors", "sessions_per_user": "Visits per visitor", "conversion": "Conversion",
@@ -183,6 +183,33 @@ def chart_retention(res: dict) -> str:
     return _png(fig)
 
 
+def chart_areas(res: dict) -> str:
+    ar = res["areas"]
+    rows = sorted(ar["rows"], key=lambda r: r["checkout_rate"])
+    y = np.arange(len(rows))
+    fig, ax = _axes(7.2, 0.42 * len(rows) + 1.1)
+    # Emphasis, not a second category: the sections the text is about in
+    # slot 1, everything else in muted ink.
+    for flagged, color, label in ((False, MUTED, "Other sections"), (True, SERIES[0], "Clearly below typical")):
+        idx = [i for i, r in enumerate(rows) if r["clearly_below"] == flagged]
+        if not idx:
+            continue
+        xs = [rows[i]["checkout_rate"] for i in idx]
+        err = [[rows[i]["checkout_rate"] - rows[i]["checkout_ci"][0] for i in idx],
+               [rows[i]["checkout_ci"][1] - rows[i]["checkout_rate"] for i in idx]]
+        ax.errorbar(xs, y[idx], xerr=err, fmt="o", color=color, ecolor=color, elinewidth=1.4, capsize=0,
+                    markersize=6, label=label)
+    ax.axvline(ar["median"], color=INK2, linewidth=1)
+    ax.text(ar["median"], len(rows) - 0.45, " typical section", color=INK2, fontsize=8, va="bottom")
+    ax.set_yticks(y, [r["label"] for r in rows])
+    ax.set_ylim(-0.6, len(rows) - 0.1)
+    ax.xaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
+    ax.grid(axis="x", color=GRID, linewidth=0.6)
+    ax.set_xlabel("Share of visits that go on to checkout, with 95% range")
+    ax.legend(frameon=False, loc="lower right", fontsize=8.5)
+    return _png(fig)
+
+
 CHART_MIN_SESSIONS = 1_000
 
 
@@ -253,7 +280,7 @@ code{font-size:14px;background:#efeee8;padding:1px 5px;border-radius:3px}
 BLACK_FRIDAY_WEEK = "2020-11-23"  # Black Friday 2020 was 27 November
 REPO_URL = "https://github.com/ankitsingathia/ga4-product-analytics"
 PROSE = {
-    "view_item": "a product page", "add_to_cart": "the cart", "begin_checkout": "checkout",
+    "view_item": "looking at products", "add_to_cart": "the cart", "begin_checkout": "checkout",
     "add_shipping_info": "shipping details", "add_payment_info": "the payment step", "purchase": "a purchase",
 }
 GAIN = {"users": "more visitors", "sessions_per_user": "people visiting more often",
@@ -277,6 +304,37 @@ def join_and(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
+def about_money(x: float) -> str:
+    """An estimate reads as one: $41,656 -> $41,700."""
+    return f"${round(x, -2):,.0f}"
+
+
+def reach(step: str) -> str:
+    """'visits that {reach(step)}': view_item fires on listings and product pages, so say what it means."""
+    return "look at any products" if step == "view_item" else f"reach {PROSE[step]}"
+
+
+def area_line(res: dict) -> str:
+    ar = res.get("areas") or {}
+    rows = ar.get("rows", [])
+    below = sorted((r for r in rows if r["clearly_below"]), key=lambda r: -r["extra_revenue_usd"])
+    out = ""
+    if below:
+        names = join_and([esc(r["label"]) for r in below[:3]])
+        lead = (f"The drop is much worse in {names}." if len(below) <= 3
+                else f"The drop is much worse in {WORDS.get(len(below), str(len(below)))} parts of the store, "
+                     f"led by {names}.")
+        out += (f"<p>{lead} If the sections that do worst matched a typical one, that would be roughly "
+                f"{num(ar['extra_orders'])} more orders over the three months, about "
+                f"{about_money(ar['extra_revenue_usd'])}. That's where I'd start.</p>")
+    for r in rows:
+        if r["broken_checkout"]:
+            out += (f"<p>Separately, {esc(r['label'])} looks broken: its visitors reach checkout "
+                    f"{pct(r['checkout_rate'])} of the time, but only {pct(r['finish_rate'])} of those checkouts "
+                    "end in an order.</p>")
+    return out
+
+
 def short_version(res: dict) -> str:
     x = res["experiment"]
     ordered = res["funnel"]["ordered"]
@@ -295,12 +353,12 @@ def short_version(res: dict) -> str:
     if x["device_specific"]:
         opp = next(o for o in res["opportunity"] if o["step"] == x["target_step"])
         return (
-            f"<p>Phones are where this store loses sales. Of mobile visits that reach {PROSE[prev]}, "
+            f"<p>Phones are where this store loses sales. Of mobile visits that {reach(prev)}, "
             f"{pct(opp['mobile_rate'])} go on to {PROSE[opp['step']]}; on desktop it's {pct(opp['desktop_rate'])}. "
             f"If phones did as well as desktops at that one step, that would be about "
             f"{num(opp['extra_purchases'])} more orders over the period, around {money(opp['extra_revenue_usd'])}. "
             f"I'd treat that as a ceiling, since some people browse on their phone and buy later on a laptop.</p>"
-            + test
+            + area_line(res) + test
         )
     leak = res["leak"]
     after = ordered[idx + 1:]
@@ -311,12 +369,12 @@ def short_version(res: dict) -> str:
                 else f"{pct(s['step_rate'], 0)} get to {PROSE[s['step']]}" for s in after]
         tail = f" Once someone does start {PROSE[leak['step']]}, most of them finish: {join_and(bits)}."
     return (
-        f"<p>Most people who look at a product never start checkout. Only {pct(leak['step_rate'])} of visits "
-        f"that reach {PROSE[prev]} go on to {PROSE[leak['step']]}, and that's the biggest drop in the whole "
+        f"<p>Most people who look at products never start checkout. Only {pct(leak['step_rate'])} of visits "
+        f"that {reach(prev)} go on to {PROSE[leak['step']]}, and that's the biggest drop in the whole "
         f"purchase path.{tail}</p>"
         f"<p>It isn't a mobile problem. Phones and desktops are within {max_gap * 100:.1f} points of each other "
-        f"at every step, and none of the differences is statistically significant. If I were running this "
-        f"store, I'd work on the product page for everyone.</p>" + test
+        f"at every step, and none of the differences is statistically significant.</p>"
+        + area_line(res) + test
     )
 
 
@@ -473,6 +531,43 @@ def render(res: dict) -> str:
         [[STEP[o["step"]], pct(o["mobile_rate"]), pct(o["desktop_rate"]), f"{o['gap_pts'] * 100:+.1f} pts",
           f"{o['p_value']:.2g}", num(o["extra_purchases"]), money(o["extra_revenue_usd"])]
          for o in res["opportunity"]])))
+
+    # ---- store sections --------------------------------------------------
+    ar = res.get("areas") or {}
+    if ar.get("rows"):
+        parts.append("<h3>Where in the store people drop off</h3>")
+        below = sorted((r for r in ar["rows"] if r["clearly_below"]), key=lambda r: r["checkout_rate"])
+        text = ("<p>I grouped visits by the part of the store where they first looked at products, so each visit "
+                f"counts once. A typical section sends {pct(ar['median'])} of its visits on to checkout.")
+        if below:
+            nb = len(below)
+            names = join_and([f"{esc(r['label'])} ({pct(r['checkout_rate'])})" for r in below])
+            text += (f" {WORDS.get(nb, str(nb)).capitalize()} section{'s are' if nb > 1 else ' is'} well below "
+                     f"that: {names}. If {'they' if nb > 1 else 'it'} matched the typical section, that would be "
+                     f"roughly {num(ar['extra_orders'])} more orders over the three months, about "
+                     f"{about_money(ar['extra_revenue_usd'])}. That's a ceiling, because people often browse small "
+                     "add-ons without meaning to buy, but it's a specific place to start. I'd look at what's "
+                     "different about those pages: stock, prices, and whether adding to cart works the same way "
+                     "there.")
+        else:
+            text += " No section is clearly below that."
+        parts.append(text + "</p>")
+        for r in ar["rows"]:
+            if r["broken_checkout"]:
+                parts.append(f"<p>{esc(r['label'])} looks broken rather than weak. Its visitors reach checkout "
+                             f"{pct(r['checkout_rate'])} of the time, but only {pct(r['finish_rate'])} of those "
+                             f"checkouts end in an order, against {pct(ar['site_finish_rate'])} across the site. "
+                             "I'd check that checkout before anything else.</p>")
+        parts.append(f'<figure><img alt="Checkout rate by store section" src="{chart_areas(res)}"><figcaption>'
+                     f"Sections with at least {num(ar['min_sessions'])} visits; the vertical line is the typical "
+                     "section.</figcaption></figure>")
+        parts.append(fold("Numbers by section", table(
+            ["Section", "Visits", "Reach checkout", "95% range", "Checkouts that finish", "Order value",
+             "Extra orders", "Extra revenue"],
+            [[r["label"], num(r["sessions"]), pct(r["checkout_rate"]),
+              f"{pct(r['checkout_ci'][0])} – {pct(r['checkout_ci'][1])}", pct(r["finish_rate"]),
+              money(r["order_value"]) if r["order_value"] else "n/a", num(r["extra_orders"]),
+              money(r["extra_revenue_usd"])] for r in ar["rows"]])))
 
     # ---- retention -------------------------------------------------------
     r, w = res["retention"], res["retention"]["weighted"]

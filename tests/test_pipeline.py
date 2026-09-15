@@ -52,6 +52,26 @@ def test_biggest_leak_ignores_the_first_step():
     assert analysis.biggest_leak(ordered)["step"] == "begin_checkout"
 
 
+def test_store_sections_match_truth(built):
+    rows = _q(built["db"], "select entry_area, sessions from fct_area_funnel")
+    got = dict(zip(rows["entry_area"], rows["sessions"]))
+    assert got == built["truth"]["sessions_by_area"]
+
+
+def test_section_analysis_flags_only_the_planted_section(built):
+    ar = analysis.area_opportunity(analysis.load(built["db"])["fct_area_funnel"])
+    flagged = [r["label"] for r in ar["rows"] if r["clearly_below"]]
+    assert flagged == ["Accessories"]
+    assert ar["extra_orders"] > 0 and ar["extra_revenue_usd"] > 0
+    assert not [r for r in ar["rows"] if r["broken_checkout"]]
+
+
+def test_area_labels_read_like_the_site():
+    assert analysis.area_label("Shop+by+Brand") == "Shop by Brand"
+    assert analysis.area_label("eco+friendly") == "Eco friendly"
+    assert analysis.area_label("store.html") == "Store home page"
+
+
 def test_revenue_split_skips_weeks_past_the_reliable_date(built):
     tree = analysis.metric_tree(analysis.load(built["db"])["fct_weekly_metrics"])
     assert "2021-01-25" not in [w["week_start"] for w in tree["weeks"]]

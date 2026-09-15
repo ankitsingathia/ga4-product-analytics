@@ -26,6 +26,12 @@ models:
   - name: fct_cohort_retention
     description: Weekly new-user cohorts over fully observed weeks only.
 
+  - name: fct_area_funnel
+    description: Checkout and purchase by the store section where each visit first looked at products.
+    columns:
+      - name: entry_area
+        data_tests: [unique, not_null]
+
   - name: fct_user_windows
     description: Per-user outcome in the experiment window, plus pre-period history.
     columns:

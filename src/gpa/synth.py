@@ -45,6 +45,15 @@ DEVICE_MIX = {"desktop": 0.57, "mobile": 0.40, "tablet": 0.03}
 # analysis should find this step, and only this step, as the device gap.
 DEVICE_PURCHASE_MULT = {"desktop": 1.0, "mobile": 0.70, "tablet": 0.90}
 RETURNING_CART_MULT = 1.20
+# Store sections: (share of sessions, multiplier on begin_checkout). The
+# planted weak section is Accessories; the analysis should flag it, alone.
+AREAS = {
+    "Apparel": (0.45, 1.0),
+    "Lifestyle": (0.25, 1.0),
+    "Drinkware": (0.15, 1.0),
+    "Accessories": (0.15, 0.35),
+}
+AREA_URL = "https://shop.googlemerchandisestore.com/Google+Redesign/"
 PRE_EXISTING_SHARE = 0.15  # users whose history starts before the window
 CHANNELS = [  # (source, medium, share of sessions)
     ("(direct)", "(none)", 0.30),
@@ -132,6 +141,9 @@ def generate(n_users: int = 60_000, seed: int = 7) -> tuple[pd.DataFrame, pd.Dat
     ft_by_user[uidx[k == 0]] = chan[k == 0]
     ft = ft_by_user[uidx]
     dev = device[uidx]
+    area_names = np.array(list(AREAS), dtype=object)
+    area = rng.choice(len(AREAS), n, p=[v[0] for v in AREAS.values()])
+    area_mult = np.array([v[1] for v in AREAS.values()])[area]
 
     # ---- funnel ---------------------------------------------------------
     steps = SYNTH_STEPS
@@ -142,6 +154,8 @@ def generate(n_users: int = 60_000, seed: int = 7) -> tuple[pd.DataFrame, pd.Dat
         p = np.full(n, STEP_P[step])
         if step == "add_to_cart":
             p = p * cart_mult[day] * np.where(session_number > 1, RETURNING_CART_MULT, 1.0)
+        if step == "begin_checkout":
+            p = p * area_mult
         if step == "purchase":
             p = p * purchase_mult
         alive &= rng.random(n) < np.clip(p, 0, 1)
@@ -209,6 +223,8 @@ def generate(n_users: int = 60_000, seed: int = 7) -> tuple[pd.DataFrame, pd.Dat
     })
     ev.loc[ev["event_name"] != "user_engagement", "engagement_time_msec"] = pd.NA
     ev["sidx"] = s
+    view_rows = ev["event_name"].to_numpy() == "view_item"
+    ev.loc[view_rows, "page_location"] = AREA_URL + area_names[area[s[view_rows]]]
 
     # ---- purchases ------------------------------------------------------
     is_p = (ev["event_name"] == "purchase").to_numpy()
@@ -282,10 +298,14 @@ def generate(n_users: int = 60_000, seed: int = 7) -> tuple[pd.DataFrame, pd.Dat
         "n_item_revenue_mismatch": int(mismatch.sum()),
         "n_purchases_without_items": int(len(dup_p)),
         "n_left_censored_users": int((prior > 0).sum()),
+        "sessions_by_area": {
+            name: int(reached[area == i, steps.index("view_item")].sum()) for i, name in enumerate(AREAS)
+        },
         "planted": {
             "step_p": STEP_P,
             "device_purchase_mult": DEVICE_PURCHASE_MULT,
             "returning_cart_mult": RETURNING_CART_MULT,
+            "area_checkout_mult": {k: v[1] for k, v in AREAS.items()},
             "quirks": QUIRKS,
         },
     }
