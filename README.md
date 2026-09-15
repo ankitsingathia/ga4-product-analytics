@@ -10,7 +10,9 @@ about 4.3 million real, obfuscated events from 1 November 2020 to 31 January 202
 ## What the data says
 
 From the full extract: 4,295,584 events, 270,154 users, 360,129 sessions,
-5,298 purchases, $339,343 revenue. Full readout: [`docs/readout.html`](docs/readout.html).
+5,298 purchases, $339,343 revenue.
+
+**[Open the full readout →](https://ankitsingathia.github.io/ga4-product-analytics/docs/readout.html)**
 
 - **The leak is product page to checkout, on every device.** Only 14.0% of
   sessions that view a product start checkout (10,807 of 77,020). After that,
