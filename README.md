@@ -123,5 +123,5 @@ src/gpa/             extract, audit, analysis, statistics, readout, test-data ge
 dbt/                 staging, intermediate and mart models with data tests
 scripts/build_all.py end-to-end build: audit, dbt, cross-check, analysis, readout
 tests/               pipeline, statistics and extract tests
-docs/                decision log and the generated write-up
+docs/                decision log, generated write-up, dashboard data and build guide
 ```
